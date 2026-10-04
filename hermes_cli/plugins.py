@@ -228,6 +228,15 @@ class LoadedPlugin:
     deferred: bool = False
 
 
+@dataclass(frozen=True)
+class InjectedMessage:
+    """Message injected by a plugin into a live CLI session."""
+
+    content: Any
+    visible: bool = True
+    preview: str | None = None
+
+
 class PluginContext:
     """Facade given to plugins so they can register tools and hooks."""
 
@@ -602,7 +611,12 @@ class PluginContext:
     # returns False. The profile-scoped config is passed through so a multi-profile process consults THIS
     # manager's home, never the active profile's (#65593 constraint).
     def inject_message(
-        self, content: str, role: str = "user", *, session_key: str | None = None,
+        self,
+        content: str,
+        role: str = "user",
+        *,
+        session_key: str | None = None,
+        visible: bool = True,
     ) -> bool:
         """Inject a message into a CLI, Ink TUI/desktop, or messaging-gateway conversation.
 
@@ -610,13 +624,16 @@ class PluginContext:
         from the messaging gateway and queue onto the live session named by ``session_key``
         (the durable key, not the ephemeral UI session id). Non-CLI injection needs that
         ``session_key`` plus ``plugins.entries.<plugin_id>.allow_gateway_injection``.
+        ``visible=False`` suppresses live classic-CLI rendering only; the message is still
+        delivered as model-facing input and follows normal session behavior.
         ``True`` means a host accepted the request, not that the turn completed.
         """
         cli = self._manager._cli_ref
         msg = content if role == "user" else f"[{role}] {content}"
         if cli is not None:
+            payload = msg if visible else InjectedMessage(content=msg, visible=False)
             queue_ = cli._interrupt_queue if getattr(cli, "_agent_running", False) else cli._pending_input
-            queue_.put(msg)
+            queue_.put(payload)
             return True
         if not session_key:
             logger.warning("inject_message: gateway mode requires an existing session_key")
